@@ -1,0 +1,67 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "master" branch
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+    
+jobs:
+  split-branches:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Parse config and create branches
+        run: |
+          CONFIG_FILE="config.json"
+          PRESERVE_FILES=".git .github README.md $CONFIG_FILE"
+          BRANCHES=$(jq -r 'keys[]' $CONFIG_FILE)
+          
+          for BRANCH in $BRANCHES; do
+            # Reset to main branch (or change to your base branch)
+            git checkout main
+            git pull origin main
+
+            # Create or reset branch
+            git checkout -B "$BRANCH"
+
+            # Get folders to preserve for this branch
+            FOLDERS=$(jq -r --arg b "$BRANCH" '.[$b][]' $CONFIG_FILE)
+            # Build preserve list
+            PRESERVE_LIST="$PRESERVE_FILES"
+            for F in $FOLDERS; do
+              PRESERVE_LIST="$PRESERVE_LIST $F"
+            done
+
+            # Find and remove files/folders not in preserve list
+            for ITEM in $(ls -A); do
+              SKIP=0
+              for KEEP in $PRESERVE_LIST; do
+                if [[ "$ITEM" == "$KEEP" ]]; then
+                  SKIP=1
+                  break
+                fi
+              done
+              if [[ $SKIP -eq 0 ]]; then
+                rm -rf "$ITEM"
+              fi
+            done
+
+            git add -A
+            git commit -m "Keep only: $FOLDERS for branch $BRANCH" || echo "Nothing to commit in $BRANCH"
+            git push -u origin "$BRANCH" --force
+          done
